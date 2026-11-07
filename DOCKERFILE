@@ -1,0 +1,54 @@
+# Hugging Face Space -- Docker SDK (HF deprecated the built-in Streamlit SDK).
+# Python 3.13 matches the 3.13.17 the app was developed and tested against.
+FROM python:3.13-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential git && \
+    rm -rf /var/lib/apt/lists/*
+
+# HF Spaces containers run as UID 1000. Create the user and set WORKDIR before
+# any COPY, and always COPY --chown=user, or the app cannot read its own files.
+RUN useradd -m -u 1000 user
+USER user
+ENV HOME=/home/user \
+    PATH=/home/user/.local/bin:$PATH
+WORKDIR $HOME/app
+
+# CPU-only torch FIRST. Installed via requirements.txt, sentence-transformers
+# would pull the CUDA build -- ~2.5 GB of wheels this Space has no GPU to use.
+RUN pip install --no-cache-dir --user \
+        --index-url https://download.pytorch.org/whl/cpu \
+        torch
+
+COPY --chown=user requirements.txt .
+RUN pip install --no-cache-dir --user -r requirements.txt
+
+# Bake the embedding model into the image so the first query does not stall on a
+# ~1 GB download, and a cold start needs no network.
+RUN python -c "from sentence_transformers import SentenceTransformer; \
+SentenceTransformer('intfloat/multilingual-e5-base')"
+
+# Pull the 3.3 GB Chroma index from the private dataset repo at BUILD time, so it
+# lives in the image. Space disk is ephemeral -- fetching at runtime instead would
+# re-download 3.3 GB every time the Space wakes from sleep.
+# Set HF_TOKEN in Space Settings -> Variables and secrets (a read-scoped token).
+ARG INDEX_REPO=harshs234/legal-translator-index
+RUN --mount=type=secret,id=HF_TOKEN,mode=0444,required=true \
+    HF_TOKEN="$(cat /run/secrets/HF_TOKEN)" \
+    python -c "import os; from huggingface_hub import snapshot_download; \
+snapshot_download(repo_id='${INDEX_REPO}', repo_type='dataset', \
+local_dir='/home/user/app/chroma_db', token=os.environ['HF_TOKEN'])"
+
+# Source last: code changes then rebuild in seconds instead of re-pulling 3.3 GB.
+COPY --chown=user . .
+
+ENV CHROMA_DIR=/home/user/app/chroma_db \
+    TERMS_DB=/home/user/app/terms.db \
+    EMBED_MODEL=intfloat/multilingual-e5-base \
+    STREAMLIT_SERVER_PORT=8501 \
+    STREAMLIT_SERVER_ADDRESS=0.0.0.0 \
+    STREAMLIT_SERVER_HEADLESS=true \
+    STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
+
+EXPOSE 8501
+CMD ["streamlit", "run", "app.py"]

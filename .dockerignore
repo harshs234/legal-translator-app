@@ -1,0 +1,17 @@
+chroma_db/
+corpus/
+venv*/
+.venv/
+__pycache__/
+*.py[cod]
+.env
+.git/
+tests/
+docs/
+data/
+inbox/
+output/
+processed/
+failed/
+*.log
+final.zip

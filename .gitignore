@@ -1,0 +1,43 @@
+# ---- Vector store ------------------------------------------------------------
+# NEVER commit this to the Space repo: Space repos are capped at 1 GB and this is
+# 3.3 GB. It lives in the private dataset repo and the Dockerfile pulls it at
+# build time. This local copy stays the source of truth for build_index.py.
+chroma_db/
+
+# terms.db IS committed on purpose: 45 MB, plain Git object, well under the 1 GB cap.
+
+# ---- API credentials / local secrets -----------------------------------------
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+
+# ---- Python environments and caches ------------------------------------------
+.venv/
+venv*/
+__pycache__/
+*.py[cod]
+
+# ---- Runtime-only automation state and user documents ------------------------
+data/
+inbox/
+output/
+processed/
+failed/
+*.log
+
+# ---- Build inputs (build-time only; not needed at runtime) -------------------
+# corpus/processed is 226 MB of generated JSONL -- keep it out.
+# corpus/curated (19 KB) STAYS tracked: tests/test_pipeline.py reads
+# corpus/curated/seed_legal.csv, so ignoring it breaks tests on a fresh clone.
+corpus/processed/
+corpus/raw/
+
+# ---- Test artifacts ----------------------------------------------------------
+tests/output/
+tests/*.pdf
+
+# ---- Internal project notes --------------------------------------------------
+docs/PROJECT_CONTEXT.md
+final.zip
+.zilliz_migrate_state.json
