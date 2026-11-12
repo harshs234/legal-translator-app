@@ -85,23 +85,10 @@ if res:
     s, t = st.session_state["dirs"]
     flagged = sum(1 for r in res if r["flags"])
     st.success(f"{len(res)} segments translated, {flagged} flagged for review.")
-    for i, r in enumerate(res, 1):
-        a, b = st.columns(2)
-        with a:
-            box(r["source"], s)
-        with b:
-            box(r["target"], t)
-        for f in r["flags"]:
-            st.warning(f"Segment {i}: {f}")
-        st.caption(f"Retrieval: {len(r['glossary'])} glossary terms, {r['n_examples']} reference passages"
-                   + (f", section: {r['section']}" if r["section"] else ""))
-        if r["glossary"]:
-            with st.expander(f"Segment {i}: glossary applied"):
-                for gs, gt, _ in r["glossary"]:
-                    st.write(f"{gs} → {gt}")
-        st.divider()
 
     # --- Pre-download validation gate -------------------------------------
+    # Deliberately ABOVE the segment list: with 20+ segments the reviewer should
+    # not have to scroll past the whole document to reach the download buttons.
     targets = [r["target"] for r in res]
     clean_paras, notes, issues = clean_and_validate(targets, target_is_arabic=(t == "ar"))
     blocking = [i["msg"] for i in issues if i["severity"] == "block"]
@@ -112,9 +99,11 @@ if res:
         for w in blocking:
             st.write(f"• {w}")
     if advisories:
-        st.warning(f"{len(advisories)} item(s) to verify:")
-        for w in advisories:
-            st.write(f"• {w}")
+        # Collapsed: these run to 20+ items on a real contract, and an expanded
+        # list here would push the download buttons back down the page.
+        with st.expander(f"⚠️ {len(advisories)} item(s) to verify"):
+            for w in advisories:
+                st.write(f"• {w}")
     if notes:
         with st.expander(f"Reviewer notes lifted out of the contract body ({len(notes)})"):
             for j, n in enumerate(notes, 1):
@@ -134,3 +123,23 @@ if res:
     else:
         st.info("Downloads are disabled until the blocking issues are acknowledged.")
     st.caption("Machine-assisted draft. Certified/sworn use requires review and signature by a qualified legal translator.")
+
+    st.divider()
+
+    # --- Side-by-side segments --------------------------------------------
+    st.markdown("##### Segments")
+    for i, r in enumerate(res, 1):
+        a, b = st.columns(2)
+        with a:
+            box(r["source"], s)
+        with b:
+            box(r["target"], t)
+        for f in r["flags"]:
+            st.warning(f"Segment {i}: {f}")
+        st.caption(f"Retrieval: {len(r['glossary'])} glossary terms, {r['n_examples']} reference passages"
+                   + (f", section: {r['section']}" if r["section"] else ""))
+        if r["glossary"]:
+            with st.expander(f"Segment {i}: glossary applied"):
+                for gs, gt, _ in r["glossary"]:
+                    st.write(f"{gs} → {gt}")
+        st.divider()
