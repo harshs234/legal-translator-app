@@ -1,0 +1,12 @@
+# Mutarjim — Editorial theme.
+# Swap these hex values for your company's brand colours any time.
+[theme]
+primaryColor = "#1E5244"              # forest green: buttons, active controls
+backgroundColor = "#FAF7F0"           # warm paper canvas
+secondaryBackgroundColor = "#F5F1E6"  # sidebar + inputs (parchment)
+textColor = "#1C2B24"                 # deep ink
+font = "sans serif"                   # body sans; headings are serif via CSS
+
+[server]
+# Quietens the harmless transformers/torchvision import noise in the logs.
+fileWatcherType = "poll"

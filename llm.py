@@ -19,6 +19,44 @@ import litellm
 from litellm import completion
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from config import settings
+import threading as _threading
+
+# ---------------------------------------------------------------------------
+# Token accounting. Every LiteLLM response carries .usage (prompt/completion/
+# total tokens); we accumulate it here. reset_usage() is called at the start of
+# a translation and read_usage() after, so the UI can show REAL token counts.
+# All of this is best-effort: if a provider omits usage, totals stay 0 and
+# translation is never affected (the update is wrapped in try/except).
+# ---------------------------------------------------------------------------
+_USAGE = {"prompt": 0, "completion": 0, "total": 0, "calls": 0}
+_USAGE_LOCK = _threading.Lock()
+
+
+def reset_usage():
+    with _USAGE_LOCK:
+        _USAGE.update(prompt=0, completion=0, total=0, calls=0)
+
+
+def read_usage():
+    with _USAGE_LOCK:
+        return dict(_USAGE)
+
+
+def _record_usage(r):
+    try:
+        u = getattr(r, "usage", None)
+        if u is None:
+            return
+        pt = int(getattr(u, "prompt_tokens", 0) or 0)
+        ct = int(getattr(u, "completion_tokens", 0) or 0)
+        tt = int(getattr(u, "total_tokens", 0) or (pt + ct))
+        with _USAGE_LOCK:
+            _USAGE["prompt"] += pt
+            _USAGE["completion"] += ct
+            _USAGE["total"] += tt
+            _USAGE["calls"] += 1
+    except Exception:
+        pass
 
 # Silently ignore params a given model/endpoint doesn't accept (e.g. temperature).
 litellm.drop_params = True
@@ -68,6 +106,7 @@ def _complete_raw(system: str, user: str, max_tokens: int):
         kwargs["api_base"] = settings.api_base
 
     r = completion(**kwargs)
+    _record_usage(r)
     choice = r.choices[0]
     text = (choice.message.content or "").strip()
     finish = (getattr(choice, "finish_reason", None) or "").lower()
