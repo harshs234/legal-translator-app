@@ -182,8 +182,20 @@ def _numbers(s: str) -> Counter:
 
 def qa_flags(src: str, out: str, glossary: list) -> list[str]:
     flags = []
-    if _numbers(src) != _numbers(out):
-        flags.append("Numbers/dates differ between source and translation")
+    sn, on = _numbers(src), _numbers(out)
+    if sn != on:
+        # Show WHICH numbers differ so the reviewer can tell a harmless reformat
+        # (date "01/05/2016" -> "1 May 2016", separators "500,000" <-> "500000")
+        # from a real error ("500,000" -> "50,000") without hunting the segment.
+        only_src = sorted((sn - on).elements())
+        only_out = sorted((on - sn).elements())
+        bits = []
+        if only_src:
+            bits.append("source only: " + ", ".join(only_src[:8]))
+        if only_out:
+            bits.append("translation only: " + ", ".join(only_out[:8]))
+        flags.append("Numbers/dates differ between source and translation"
+                     + ((" — " + "; ".join(bits)) if bits else ""))
     ratio = len(out) / max(len(src), 1)
     if ratio < 0.4 or ratio > 3.0:
         flags.append(f"Suspicious length ratio ({ratio:.2f}): possible omission or addition")

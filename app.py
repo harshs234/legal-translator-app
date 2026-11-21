@@ -117,6 +117,12 @@ st.markdown("""
 .usage .u-cost{margin-top:8px;font-size:.8rem;color:var(--amber);font-weight:600}
 .usage .u-sess{margin-top:8px;padding-top:8px;border-top:1px dashed var(--line);font-size:.75rem;color:var(--muted)}
 .usage .u-sess b{color:var(--green-dk)}
+.usage .u-live{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--amber);
+  margin-right:8px;animation:pulse 1.25s ease-in-out infinite;vertical-align:middle}
+.segno{font-size:.7rem;letter-spacing:.12em;text-transform:uppercase;font-weight:700;color:var(--green);
+  background:#EAF0EC;border:1px solid #CFE0D6;border-radius:3px;padding:4px 9px}
+.rev{font-size:.9rem;color:var(--ink);margin:4px 0;line-height:1.5}
+.rev b{color:var(--green-dk)}
 </style>
 """, unsafe_allow_html=True)
 
@@ -136,13 +142,15 @@ def _dur(sec):
     return f"{h} hr {m:02d} min"
 
 
-def _usage_html(u, cum=None):
+def _usage_html(u, cum=None, live=False):
     def fmt(n):
         return f"{int(n or 0):,}"
     total = u.get("total", 0) or (u.get("prompt", 0) + u.get("completion", 0))
+    dot = '<span class="u-live"></span>' if live else ''
+    cap = "tokens &middot; so far" if live else "tokens &middot; last document"
     body = (
-        f'<div class="u-big">{fmt(total)}</div>'
-        f'<div class="u-cap">tokens &middot; last document</div>'
+        f'<div class="u-big">{dot}{fmt(total)}</div>'
+        f'<div class="u-cap">{cap}</div>'
         f'<div class="u-split">'
         f'<span>Input <b>{fmt(u.get("prompt", 0))}</b></span>'
         f'<span>Output <b>{fmt(u.get("completion", 0))}</b></span>'
@@ -153,9 +161,25 @@ def _usage_html(u, cum=None):
         c = (u.get("prompt", 0) / 1e6) * PRICE_IN_PER_1M + (u.get("completion", 0) / 1e6) * PRICE_OUT_PER_1M
         body += f'<div class="u-cost">est. cost ${c:,.4f}</div>'
     if cum and cum.get("total"):
-        body += (f'<div class="u-sess">Session total <b>{fmt(cum["total"])}</b> tokens '
+        lab = "Session so far" if live else "Session total"
+        body += (f'<div class="u-sess">{lab} <b>{fmt(cum["total"])}</b> tokens '
                  f'&middot; {fmt(cum.get("calls", 0))} calls</div>')
     return f'<div class="usage">{body}</div>'
+
+
+def _render_token_slot(slot, live=False):
+    """Paint the token-economy card into a placeholder. live=True reads the running
+    accumulator (so the card climbs mid-translation); otherwise it shows the last
+    completed document from session_state."""
+    if live:
+        u = read_usage()
+        base = st.session_state.get("usage_cum") or {}
+        cum = {k: base.get(k, 0) + u.get(k, 0)
+               for k in ("prompt", "completion", "total", "calls")}
+    else:
+        u = st.session_state.get("usage") or {"prompt": 0, "completion": 0, "total": 0, "calls": 0}
+        cum = st.session_state.get("usage_cum")
+    slot.markdown(_usage_html(u, cum, live=live), unsafe_allow_html=True)
 
 
 def _progress_html(pct, done, total, elapsed, eta, finished=False):
@@ -196,6 +220,7 @@ st.markdown(f"""
 
 # ---- sidebar ---------------------------------------------------------------
 n_terms = termstore.count()
+token_slot = None  # placeholder the translate loop updates live (set below)
 with st.sidebar:
     st.markdown(f'<div class="side-brand">{COMPANY_NAME}</div>', unsafe_allow_html=True)
     st.metric("Terminology entries", f"{n_terms:,}")
@@ -209,10 +234,12 @@ with st.sidebar:
             "3. **Translate** consistently across the document\n"
             "4. **Verify** — flag numbers, omissions and terms for review"
         )
+    _translating = st.session_state.get("translating")
     _u = st.session_state.get("usage")
-    if _u:
+    if _translating or _u:
         st.markdown('<div class="side-sec">Token economy</div>', unsafe_allow_html=True)
-        st.markdown(_usage_html(_u, st.session_state.get("usage_cum")), unsafe_allow_html=True)
+        token_slot = st.empty()
+        _render_token_slot(token_slot, live=bool(_translating))
     st.caption("Machine-assisted draft. Not a substitute for a certified legal translator.")
 
 # ---- 1 · input -------------------------------------------------------------
@@ -282,6 +309,8 @@ if st.session_state.get("translating"):
             _progress_html(int(frac * 100), done, total, elapsed, eta),
             unsafe_allow_html=True,
         )
+        if token_slot is not None:
+            _render_token_slot(token_slot, live=True)
 
     try:
         reset_usage()
@@ -306,6 +335,7 @@ if st.session_state.get("translating"):
     st.rerun()
 else:
     if st.button("Translate document", type="primary", use_container_width=True):
+        reset_usage()  # zero the counter now so the live card starts at 0 on rerun
         st.session_state["translating"] = True
         st.rerun()
 
@@ -326,21 +356,30 @@ if res:
 
     targets = [r["target"] for r in res]
     clean_paras, notes, issues = clean_and_validate(targets, target_is_arabic=(t == "ar"))
-    blocking = [i["msg"] for i in issues if i["severity"] == "block"]
-    advisories = [i["msg"] for i in issues if i["severity"] == "warn"]
+    blocking = [i for i in issues if i["severity"] == "block"]
+    advisories = [i for i in issues if i["severity"] == "warn"]
+
+    def _loc(seg):
+        # Segments are 1-indexed in the "Segment by segment" view below.
+        return f"Segment {seg + 1}" if seg is not None else "Document-wide"
 
     if blocking:
         st.error(f"{len(blocking)} blocking issue(s) must be reviewed before this draft is used:")
-        for w in blocking:
-            st.write(f"• {w}")
+        for it in blocking:
+            st.markdown(f'<div class="rev">• <b>{_loc(it["seg"])}</b> — {_esc(it["msg"])}</div>',
+                        unsafe_allow_html=True)
     if advisories:
         with st.expander(f"⚠️ {len(advisories)} item(s) to verify"):
-            for w in advisories:
-                st.write(f"• {w}")
+            for it in advisories:
+                st.markdown(f'<div class="rev">• <b>{_loc(it["seg"])}</b> — {_esc(it["msg"])}</div>',
+                            unsafe_allow_html=True)
     if notes:
         with st.expander(f"Reviewer notes lifted out of the document body ({len(notes)})"):
             for j, n in enumerate(notes, 1):
-                st.write(f"{j}. {n}")
+                seg = n.get("seg") if isinstance(n, dict) else None
+                text = n["text"] if isinstance(n, dict) else n
+                st.markdown(f'<div class="rev">{j}. <b>{_loc(seg)}</b> — {_esc(text)}</div>',
+                            unsafe_allow_html=True)
 
     full = "\n\n".join(clean_paras)
     can_download = True
@@ -384,7 +423,7 @@ if res:
               <div class="{t_cls}">{_esc(r["target"])}</div>
             </div>
           </div>
-          <div class="foot">{chips}<span class="meta">{meta}</span></div>
+          <div class="foot"><span class="segno">Segment {i}</span>{chips}<span class="meta">{meta}</span></div>
         </div>
         """, unsafe_allow_html=True)
         if r["glossary"]:

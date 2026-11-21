@@ -72,12 +72,12 @@ def _numbering_gaps(joined: str) -> list[str]:
     return msgs
 
 
-def _clean_line(line: str, notes: list[str]) -> str:
+def _clean_line(line: str, notes: list, seg: int = None) -> str:
     line = _GLOSSARY_TAG.sub("", line)
     line = _ANGLE_TERM.sub(r"\1", line)
 
     def _grab(m):
-        notes.append(m.group(1).strip())
+        notes.append({"text": m.group(1).strip(), "seg": seg})
         return f"[see reviewer note {len(notes)}]"
 
     line = _NOTE.sub(_grab, line)
@@ -95,27 +95,27 @@ def clean_and_validate(paragraphs: list[str], target_is_arabic: bool):
     """
     clean_paras, notes, issues = [], [], []
 
-    def add(sev: str, msg: str):
-        issues.append({"severity": sev, "msg": msg})
+    def add(sev: str, msg: str, seg: int = None):
+        issues.append({"severity": sev, "msg": msg, "seg": seg})
 
-    for p in paragraphs:
+    for p_idx, p in enumerate(paragraphs):
         out_lines = []
         for line in p.split("\n"):
             if _PAGE_LABEL.match(line):
                 continue  # drop page-header bleed that slipped past preprocessing
-            c = _clean_line(line, notes)
+            c = _clean_line(line, notes, seg=p_idx)
             if not c:
                 continue
             out_lines.append(c)
             # English target should contain no Arabic script -> blocks download
             if not target_is_arabic and _ARABIC.search(c):
-                add("block", f"Untranslated Arabic left in the English output: “{c[:60]}…”")
+                add("block", f"Untranslated Arabic left in the English output: “{c[:60]}…”", seg=p_idx)
             # a whole line that is just a connective/negation, or a line trailing off
             # with a dangling bare negation -> sentence split across a boundary
             if _ORPHAN.match(c) or _ORPHAN_NEG.search(c):
-                add("block", f"Orphaned sentence fragment (likely a split error): “…{c[-40:].strip()}”")
+                add("block", f"Orphaned sentence fragment (likely a split error): “…{c[-40:].strip()}”", seg=p_idx)
             elif _DANGLING.search(c) and len(c) > 40:
-                add("warn", f"Possible unfinished sentence: “…{c[-60:]}”")
+                add("warn", f"Possible unfinished sentence: “…{c[-60:]}”", seg=p_idx)
         clean_paras.append("\n".join(out_lines))
 
     joined = "\n".join(clean_paras)
@@ -161,7 +161,10 @@ def to_docx(paragraphs: list[str], rtl: bool) -> bytes:
         doc.add_page_break()
         doc.add_heading("Reviewer Notes — not part of the translated text", level=1)
         for i, n in enumerate(notes, 1):
-            doc.add_paragraph(f"{i}. {n}", style="List Number")
+            seg = n.get("seg") if isinstance(n, dict) else None
+            text = n["text"] if isinstance(n, dict) else n
+            loc = f" (Segment {seg + 1})" if seg is not None else ""
+            doc.add_paragraph(f"{i}. {text}{loc}", style="List Number")
 
     buf = io.BytesIO()
     doc.save(buf)
