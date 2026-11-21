@@ -15,7 +15,7 @@ import termstore
 # ============================================================================
 # BRANDING — edit these three lines; drop your logo in assets/logo.png
 # ============================================================================
-APP_NAME = "Legal Doc Translator"                  # <-- product name shown in the header
+APP_NAME = "Document Translator"                  # <-- product name shown in the header
 COMPANY_NAME = "3i Infotech Ltd"          # <-- your company name
 LOGO_PATH = Path("assets/logo.png")    # <-- replace this file with your logo
 # Optional sidebar cost estimate. Set BOTH to your plan's USD price per
